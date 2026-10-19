@@ -37,7 +37,6 @@ import (
 // a compiled host binary to function, which can be explicitly provided via CLI flag
 
 var (
-	sgxPath     = flag.String("sgx_path", "../../enclave/build/enclave.test", "Path to binary holding the enclave")
 	nitroPath   = flag.String("nitro_path", "../../enclave/build/enclave.nsm", "Path to nitro binary")
 	hostPath    = flag.String("host_path", "../main", "Path to go host binary")
 	econfigPath = flag.String("econfig_path", "testdata/enclave.config", "Path to enclave configuration")
@@ -49,7 +48,6 @@ var (
 )
 
 const (
-	enclaveSGX   = "sgx"
 	enclaveNitro = "nitro"
 )
 
@@ -263,7 +261,7 @@ func run(m *testing.M, enclaveType string) int {
 }
 
 func initializeAndRun(m *testing.M) int {
-	return run(m, enclaveSGX) + run(m, enclaveNitro)
+	return run(m, enclaveNitro)
 }
 
 func TestMain(m *testing.M) {
@@ -357,10 +355,6 @@ func start(enclaveType string) group {
 			"-econfig_path", *econfigPath,
 		}
 		switch enclaveType {
-		case enclaveSGX:
-			args = append(args,
-				"-enclave_type", enclaveSGX,
-				"-sgx_path", *sgxPath)
 		case enclaveNitro:
 			args = append(args,
 				"-enclave_type", enclaveNitro,

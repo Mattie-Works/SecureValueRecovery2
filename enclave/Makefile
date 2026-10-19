@@ -1,6 +1,6 @@
 # Copyright 2024 Signal Messenger, LLC
 # SPDX-License-Identifier: AGPL-3.0-only
-all: test build sign
+all: test build
 
 MAKEFILTER=| (grep --line-buffered -v '^make\[' || true)
 
@@ -14,9 +14,7 @@ include .testdepends
 
 .PHONY: build
 
-build: build/enclave.bin build/enclave.nsm
-
-sign: build/enclave.test build/enclave.Standard_DC2s_v3 build/enclave.Standard_DC8s_v3 build/enclave.Standard_DC24s_v3
+build: build/enclave.nsm
 
 PROTO_FILES= \
   $(patsubst ../shared/proto/%.proto,build/proto/%.pb.cc,$(wildcard ../shared/proto/*.proto)) \
@@ -53,19 +51,7 @@ build/noise-c/TEST.a: build/libsodium/TEST.a
 	 $(MAKE) -C src/protocol) $(QUIET_OUT)
 	$(QUIET) cp noise-c/src/protocol/libnoiseprotocol.a $@
 	$(QUIET) echo -e "BUILT\t$@"
-build/noise-c/SGX.a: build/libsodium/SGX.a | build/noise-c/TEST.a
-	$(QUIET) echo -e "BUILD\t$@"
-	$(QUIET) mkdir -p $(@D)
-	$(QUIET) (cd noise-c && \
-	 (git clean -fxd ; git submodule foreach --recursive git clean -xfd ; true) && \
-	 ./autogen.sh && \
-   libsodium_CFLAGS=-I$$PWD/../build/libsodium/SGX.a.dir/include/ libsodium_LIBS=$$PWD/../build/libsodium/SGX.a \
-	 CC=$(CC) CFLAGS="$(SGX_CFLAGS) -I$(shell ./find_header.sh $(CC) immintrin.h)" ./configure --with-libsodium && \
-   $(MAKE) clean && \
-	 $(MAKE) -C src/protocol) $(QUIET_OUT)
-	$(QUIET) cp noise-c/src/protocol/libnoiseprotocol.a $@
-	$(QUIET) echo -e "BUILT\t$@"
-build/noise-c/X86.a: build/libsodium/X86.a | build/noise-c/SGX.a
+build/noise-c/X86.a: build/libsodium/X86.a | build/noise-c/TEST.a
 	$(QUIET) echo -e "BUILD\t$@"
 	$(QUIET) mkdir -p $(@D)
 	$(QUIET) (cd noise-c && \
@@ -118,16 +104,7 @@ build/libsodium/TEST.a:
   CC=$(CC) CXX=$(CXX) --prefix=$$PWD/../$@.dir && $(MAKE) clean && $(MAKE) install) $(QUIET_OUT)
 	$(QUIET) ln -s $$PWD/$@.dir/lib/libsodium.a $@
 	$(QUIET) echo -e "BUILT\t$@"
-build/libsodium/SGX.a: | build/libsodium/TEST.a
-	$(QUIET) echo -e "BUILD\t$@"
-	$(QUIET) mkdir -p $@.dir $(@D)
-	$(QUIET) (cd libsodium && (git clean -fxd || true) && ./configure \
-  CFLAGS="$(SGX_CFLAGS) $(LIBSODIUM_UNDEFS)" \
-  CXXFLAGS="$(SGX_CXXFLAGS) $(LIBSODIUM_UNDEFS)" \
-  CC=$(CC) CXX=$(CXX) --prefix=$$PWD/../$@.dir && $(MAKE) clean && $(MAKE) install) $(QUIET_OUT)
-	$(QUIET) ln -s $$PWD/$@.dir/lib/libsodium.a $@
-	$(QUIET) echo -e "BUILT\t$@"
-build/libsodium/X86.a: | build/libsodium/SGX.a
+build/libsodium/X86.a: | build/libsodium/TEST.a
 	$(QUIET) echo -e "BUILD\t$@"
 	$(QUIET) mkdir -p $@.dir $(@D)
 	$(QUIET) (cd libsodium && (git clean -fxd || true) && ./configure \
@@ -137,27 +114,14 @@ build/libsodium/X86.a: | build/libsodium/SGX.a
 	$(QUIET) ln -s $$PWD/$@.dir/lib/libsodium.a $@
 	$(QUIET) echo -e "BUILT\t$@"
 
-EDGER8R_FILES=build/svr2/svr2_t.h build/svr2/svr2_t.c build/svr2/svr2_args.h
-# This $(firstword) trick allows for grouped targets.
-$(filter-out $(firstword $(EDGER8R_FILES)),$(EDGER8R_FILES)): $(firstword $(EDGER8R_FILES))
-$(firstword $(EDGER8R_FILES)): ../shared/svr2.edl
-	$(QUIET) echo -e "EDGER8\t$(EDGER8R_FILES)"
-	$(QUIET) mkdir -p $(@D)
-	$(QUIET) $(OE_EDGER8R) $< --trusted \
-    --trusted-dir build/svr2 \
-		--search-path $(OE_INCDIR) \
-		--search-path $(OE_INCDIR)/openenclave/edl/sgx $(QUIET_OUT)
-
-generated: $(EDGER8R_FILES) protos
-build/%/SGX.a: generated
-	$(QUIET) $(MAKE) -f Makefile.subdir DIR=$* ENV=SGX $(MAKEFILTER)
+generated: protos
 build/%/X86.a: generated
 	$(QUIET) $(MAKE) -f Makefile.subdir DIR=$* ENV=X86 $(MAKEFILTER)
 build/%/TEST.a: generated
 	$(QUIET) $(MAKE) -f Makefile.subdir DIR=$* ENV=TEST $(MAKEFILTER)
 build/%/HOST.a: generated
 	$(QUIET) $(MAKE) -f Makefile.subdir DIR=$* ENV=HOST $(MAKEFILTER)
-.PHONY: build/%/SGX.a build/%/TEST.a build/%/HOST.a build/%/X86.a
+.PHONY: build/%/TEST.a build/%/HOST.a build/%/X86.a
 
 CORE_LIBRARIES_PRE_ENV = \
   core \
@@ -189,37 +153,6 @@ CORE_LIBRARIES_POST_ENV = \
   libsodium \
 ## CORE_LIBRARIES_POST_ENV
 
-# All libraries which will become part of enclave.bin.  If A depends on B, then A should be added before B.
-SGX_LIBRARIES = \
-  svr2 \
-  ecalls \
-  $(CORE_LIBRARIES_PRE_ENV) \
-  env/sgx \
-  attestation/oe \
-  attestation/sgx \
-  $(CORE_LIBRARIES_POST_ENV) \
-## SGX_LIBRARIES
-
-build/enclave.bin: $(patsubst %,build/%/SGX.a,$(SGX_LIBRARIES))
-	$(QUIET) echo -e "BUILD\t$@"
-	$(QUIET) $(CXX) -o $@ $(SGX_LDFLAGS) -Wl,--start-group $^ -Wl,--end-group $(SGX_LDFLAGS)
-
-build/enclave.Standard_DC2s_v3: build/enclave.bin build/public.pem build/private.pem svr2_Standard_DC2s_v3.conf
-	$(QUIET) echo -e "SIGN\t$@"
-	$(QUIET) $(OE_DIR)/bin/oesign sign -e $< -c svr2_Standard_DC2s_v3.conf -k build/private.pem -o $@ $(QUIET_OUT)
-
-build/enclave.Standard_DC8s_v3: build/enclave.bin build/public.pem build/private.pem svr2_Standard_DC8s_v3.conf
-	$(QUIET) echo -e "SIGN\t$@"
-	$(QUIET) $(OE_DIR)/bin/oesign sign -e $< -c svr2_Standard_DC8s_v3.conf -k build/private.pem -o $@ $(QUIET_OUT)
-
-build/enclave.Standard_DC24s_v3: build/enclave.bin build/public.pem build/private.pem svr2_Standard_DC24s_v3.conf
-	$(QUIET) echo -e "SIGN\t$@"
-	$(QUIET) $(OE_DIR)/bin/oesign sign -e $< -c svr2_Standard_DC24s_v3.conf -k build/private.pem -o $@ $(QUIET_OUT)
-
-build/enclave.test: build/enclave.bin build/public.pem build/private.pem svr2_test.conf
-	$(QUIET) echo -e "SIGN\t$@"
-	$(QUIET) $(OE_DIR)/bin/oesign sign -e $< -c svr2_test.conf -k build/private.pem -o $@ $(QUIET_OUT)
-
 NSM_LIBRARIES = \
   socketmain \
   $(CORE_LIBRARIES_PRE_ENV) \
@@ -246,14 +179,6 @@ clean:
 	$(QUIET) rm -vfr build $(QUIET_OUT)
 	$(QUIET) rm -vf .testdepends $(QUIET_OUT)
 
-build/private.pem:
-	$(QUIET) echo -e "KEY\t$@"
-	$(QUIET) mkdir -p $(@D)
-	$(QUIET) openssl genrsa -out $@ -3 3072 $(QUIET_OUT)
-build/public.pem: build/private.pem
-	$(QUIET) echo -e "KEY\t$@"
-	$(QUIET) openssl rsa -in $< -pubout -out $@ $(QUIET_OUT)
-
 %.test.out %.test.success: %.test
 	$(QUIET) echo -e "TEST\t$<"
 	$(QUIET) ./$^ --gtest_color=yes &>$*.test.out || (cat $*.test.out; false)
@@ -264,14 +189,6 @@ build/public.pem: build/private.pem
 	$(QUIET) echo -e "GRIND\t$<"
 	$(QUIET) valgrind --tool=memcheck --leak-check=full --error-exitcode=3 -s --track-origins=yes ./$^ &>$@ || (cat $@; false)
 	$(QUIET) echo -e "GRIND\xE2\x9c\x85\t$<"
-
-build/testhost/libsvr2.a: 
-	$(QUIET) mkdir -p $(@D)
-	$(CC) -c -o build/testhost/svr2.o $(HOST_CFLAGS) ../host/enclave/c/svr2_u.c
-	ar rcs $@ build/testhost/svr2.o
-
-build/testhost.bin: testhost/testhost.cc build/testhost/libsvr2.a build/attestation/HOST.a build/metrics/HOST.a build/proto/HOST.a build/protobuf-lite/HOST.a
-	$(CXX) -o $@ $(HOST_CXXFLAGS) $(HOST_LDFLAGS) $^ $(HOST_LDFLAGS)
 
 validate:
 

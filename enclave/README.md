@@ -2,27 +2,18 @@
 
 SVR2 uses C++ as its language for building an in-enclave binary. The details
 of the build process and the host-enclave interaction depend on the platform.
-Since SVR2 is deployed on Intel SGX, this document will describe SGX-specific
-implementation details. 
-
-For SGX, the enclave binary is built with the OpenEnclave (hereafter 'OE') 
-SDK.  The binary, `enclave.bin` is then signed via OE's `oesign`, which 
-doesn't matter to us because we don't trust the signature,
-just the unique ID (SGX "mrenclave") of the resulting signed config.  However,
-the `oesign` process does one important thing:  it binds a config (either
-`svr2_test.conf` or `svr2.conf` to the resulting object.  Once this process
-is complete, the resulting `enclave.signed` file is ready to be loaded into a
-DCAP-based SGX enclave.
+This fork builds the C++ engine for AWS Nitro Enclaves and the socket-based
+SEV-SNP environment. The `enclave/build/enclave.nsm` binary is used both in
+Nitro images and in explicitly simulated local tests. No Open Enclave SDK or
+Intel SGX runtime is required.
 
 # Host/enclave communication
 
-After initialization, all host/enclave communication happens through a single 
-ocall/ecall combination, defined in `../shared/svr2.edl`:
+After initialization, host/enclave communication uses length-prefixed protobuf
+messages over a socket (TCP in simulation/SEV, vsock in Nitro):
 
-- `svr2_input_message`:  Enclave receives a message (a serialized
-  `HostToEnclaveMessage` protobuf) from the host.
-- `svr2_output_message`:  Enclave sends a message (a serialized
-  `EnclaveToHostMessage` protobuf) to the host.
+- `InboundMessage`: host-to-enclave protobuf frame.
+- `OutboundMessage`: enclave-to-host protobuf frame.
 
 Certain messages are 'transactions', or messages with a `Request` that want
 a specific `Reply`.  It is important to note that if a request is
@@ -85,14 +76,13 @@ This approach, though, lays some requirements on the host side, as
 for both cases, reordering of messages breaks the block-cipher
 assumptions of the clients/peers.  Internally, SVR2 maintains correct
 order of messages it outputs to peers and clients:  if message A
-to a peer or client happens before message B, then `svr2_output_message(A)`
-will be called and allowed to complete before `svr2_output_message(B)`.
+to a peer or client happens before message B, then its outbound frame for A
+will be emitted before the outbound frame for B.
 However, on the host side, care must be taken to respect this
 ordering: when messages are forwarded externally or received from external
-hosts, their calls to `svr2_input_message` should follow the same pattern:
+hosts, their inbound message forwarding should follow the same pattern:
 if A is received before B in either a peer or client stream, then
-`svr2_input_message(A)` should be called and allowed to complete before
-`svr2_input_message(B)` is called.
+message A should be delivered before message B.
 
 Some global locks are of course still required, in particular around Raft
 and its associated logs/database.  However, these locked sections are kept

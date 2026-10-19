@@ -24,7 +24,7 @@ class Environment {
   Environment();
   virtual ~Environment() {}
   virtual void Init();
-  // Given a 32-byte key, return evidence of that key (an OpenEnclave report).
+  // Given a 32-byte key, return platform-specific attestation evidence.
   virtual std::pair<e2e::Attestation, error::Error> Evidence(
       context::Context* ctx,
       const attestation::AttestationData& attestation) const = 0;

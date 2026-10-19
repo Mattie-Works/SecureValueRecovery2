@@ -11,7 +11,7 @@ in a multi-replica, strong-consensus, shared storage mechanism based on
 in-memory Raft.
 
 The SVR3 project expands on this approach by implementing secret-sharing
-across multiple hardware-protected backends (SGX, Nitro, SEV-SNP),
+across multiple hardware-protected backends (Nitro and SEV-SNP in this fork),
 requiring breaking of all underlying hardware security models to extract
 the necessary secrets.
 
@@ -52,8 +52,7 @@ just run `make` at the top-level.  You must have a valid `docker` installed
 locally to do this.  Running this at the top-level will:
 
 - Create a docker image in which to build things
-- Build `enclave/enclave.test` (a debug enclave for simulation/testing) and
-  `enclave/enclave.signed` (a production enclave)
+- Build `enclave/build/enclave.nsm` (the Nitro application, also used in local simulation)
 - Build and test the host-side process in `host/`
 
 If you'd like to incrementally build and change things, you can do so by
@@ -76,7 +75,7 @@ Code is divided into a few main directories at the top-level
 *  `docker` - Contains the spec for the docker image used to build everything else.
 *  `shared` - Contains all code/configs that must be shared between the host and enclave.
               This includes any protos that the host and enclave use to communicate,
-              and the definitions of ocalls/ecalls (the `*.edl` files).
+              including the protobuf messages used by the socket transport.
 *  `enclave` - Contains all code and build rules for building the in-enclave binary.
                This is a C++ codebase.
 *  `host` - Contains all code and build rules for building the host-side binary, which
@@ -96,30 +95,15 @@ Depending on which trusted compute platform the server application is running on
 verify that the versioned artifact is built from the source code of this repository or at least
 verify some details about what the remote software is running.
 
-### Verifying SVR2 measurements
-SVR2 only supports SGX. Clients attest that the server is running a particular enclave binary represented by an MRENCLAVE. SGX enclave builds deterministically reproducible. To verify, build the enclave binary from source yourself and checking the resulting MRENCLAVE value.
+### SVR2 deployments in this fork
 
-Suppose your client attests that the remote enclave has the MRENCLAVE [a6622ad4656e1abcd0bc0ff17c229477747d2ded0495c4ebee7ed35c1789fa97](https://github.com/signalapp/Signal-Android/blob/4b8546a1510bbc6e54be5aeadd02aac2934ccee1/app/build.gradle.kts#L199)
-
-```sh
-# Checkout the commit that introduced the enclave
-git checkout $(git log --diff-filter=A --pretty=format:"%h" -- enclave/releases/sgx/default.a6622ad4656e1abcd0bc0ff17c229477747d2ded0495c4ebee7ed35c1789fa97) && git submodule update
-
-# Enter the build environment
-make dockersh
-
-# Build the enclave
-make enclave
-
-# should match a6622ad4656e1abcd0bc0ff17c229477747d2ded0495c4ebee7ed35c1789fa97
-/opt/openenclave/bin/oesign dump -e enclave/build/enclave.signed | fgrep mrenclave
-```
+Intel SGX support has been removed from the source, build, runtime, and release artifacts.
+Deploy on Nitro or SEV-SNP with the corresponding platform attestation. Existing clients
+that require an SGX MRENCLAVE are **not compatible** without a client-side trust-policy
+and attestation update. See [SGX removal and deployment notes](docs/SGX_REMOVAL.md).
 
 ### Verifying SVR3 measurements
 SVR3 supports multiple trusted compute platforms. The specifics of verification depend on the platform.
-
-#### Verifying SGX measurements
-See the SVR2 verification section. For SVR3, you can find what MRENCLAVE a client attests [in libsignal](https://github.com/signalapp/libsignal/blob/a4a0663528dadc38215e46c6f94484b435f5fe02/rust/attest/src/constants.rs#L21).
 
 #### Verifying Nitro measurements
 Nitro builds are also deterministic, and so you can verify an attested server corresponds to the committed source code by building the eif image yourself and comparing the resulting PCR measurements.
