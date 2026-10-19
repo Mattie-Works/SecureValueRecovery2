@@ -54,6 +54,8 @@ RUN mkdir /src && \
       cmake \
       valgrind \
       xz-utils \
+      wget \
+      ca-certificates \
       libstdc++-12-dev \
     && break; done && apt-get clean
 
