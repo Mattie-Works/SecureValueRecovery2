@@ -191,3 +191,217 @@ The host starts the simulated enclave as a child process, using TCP
 
 See also [SGX removal notes](SGX_REMOVAL.md) and
 [`host/integration/testdata/enclave.config`](../host/integration/testdata/enclave.config).
+
+
+## Troubleshooting: Docker networking, Redis Cluster and startup
+
+The initial host-network/standalone-Redis example above is insufficient for
+SVR2's Redis peer discovery: `host/peer/peerdb/peerdb.go` uses
+`redis.NewClusterClient`. Prefer a **private Docker bridge network** and
+Redis Cluster, even for local testing. Do not advertise the host LAN address
+(`192.168.108.134`) when both services communicate inside Compose.
+
+### Recommended bridge-network example
+
+Use these *replacement* settings in `deploy/standard/host.yaml`:
+
+```yaml
+peerAddr: "svr2:9000"
+clientListenAddr: "0.0.0.0:8080"
+controlListenAddr: "0.0.0.0:8081"
+enclaveId: "enclave"
+redis:
+  name: "svr2-standard"
+  addrs: ["redis:6379"]
+raft:
+  tickDuration: 1s
+  initialJoinDuration: 1m
+otlpEnabled: false
+```
+
+Use this Compose example instead of the host-network example above:
+
+```yaml
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    hostname: redis
+    command:
+      - redis-server
+      - --bind
+      - "0.0.0.0"
+      - --port
+      - "6379"
+      - --cluster-enabled
+      - "yes"
+      - --cluster-config-file
+      - nodes.conf
+      - --cluster-node-timeout
+      - "5000"
+      - --cluster-announce-hostname
+      - redis
+      - --cluster-preferred-endpoint-type
+      - hostname
+      - --appendonly
+      - "yes"
+      - --protected-mode
+      - "no"
+    volumes:
+      - redis-data:/data
+    networks: [svr2-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  svr2:
+    build:
+      context: ../..
+      dockerfile: deploy/standard/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in deploy/standard/.env}
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [svr2-net]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/health/ready"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+networks:
+  svr2-net:
+    driver: bridge
+
+volumes:
+  redis-data:
+```
+
+The Redis service name is a Docker DNS hostname. Redis Cluster also advertises
+topology endpoints to clients, so the advertised endpoint must resolve and be
+reachable **from the SVR2 container**. Hostname announcements require compatible
+Redis and Go client versions; verify `CLUSTER SLOTS` and client behavior.
+`protected-mode no` is safe only on a restricted, unexposed development
+network. No Redis host port is published.
+
+### Error: `Address already in use` on Nitro simulation port 27427
+
+```text
+socketmain/socketmain.cc ... bind ... errno(98): Address already in use
+Nitro simulated command finished: signal: aborted
+```
+
+The simulated enclave listens on TCP 27427. With `network_mode: host`,
+another process or container can own the same port. Inspect:
+
+```sh
+sudo ss -ltnp '( sport = :27427 )'
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
+```
+
+Prefer bridge networking (the enclave and host still share the *same* SVR2
+container network namespace). Alternatively change `-nitro_port` to an
+unused port such as 27428. If the conflict persists under bridge networking,
+check for duplicate child processes inside the SVR2 container.
+
+### Error: `ERR This instance has cluster support disabled`
+
+This means the Redis server is running in standalone mode while SVR2 uses
+`redis.NewClusterClient`. Enable `--cluster-enabled yes`, persist
+`nodes.conf` in a Redis volume, and initialize hash slots on a fresh
+single-node development cluster:
+
+```sh
+docker compose -f deploy/standard/compose.yaml up -d redis
+docker compose -f deploy/standard/compose.yaml exec redis redis-cli cluster addslotsrange 0 16383
+docker compose -f deploy/standard/compose.yaml exec redis redis-cli cluster info
+```
+
+Only assign slots if they are not already assigned. This one-node approach
+is for debugging and may not reach a healthy cluster state on all Redis
+versions/configurations.
+
+### Error: `dial tcp :6379: connect: connection refused`
+
+The missing host in `:6379` strongly suggests a malformed or missing
+advertised Redis Cluster endpoint, *not* necessarily a Docker DNS failure.
+Inspect the topology:
+
+```sh
+docker compose -f deploy/standard/compose.yaml exec redis redis-cli cluster nodes
+docker compose -f deploy/standard/compose.yaml exec redis redis-cli cluster slots
+docker compose -f deploy/standard/compose.yaml exec redis redis-cli cluster shards
+docker compose -f deploy/standard/compose.yaml logs --tail=100 redis
+```
+
+Check that `redis:6379` resolves inside the SVR2 network and that the
+Redis-advertised endpoint is nonempty. Redis may return an empty or `?`
+endpoint if it cannot determine an address. Setting
+`--cluster-announce-hostname redis` and
+`--cluster-preferred-endpoint-type hostname` may resolve this, provided
+the client supports hostname endpoints. If not, use a **stable private
+Docker IP** announced by Redis and keep the network private; do not
+publish unauthenticated Redis on the host LAN.
+
+### Error: `cluster_state:fail` with all 16384 slots assigned
+
+Example:
+
+```text
+cluster_state:fail
+cluster_slots_assigned:16384
+cluster_slots_ok:16384
+cluster_known_nodes:1
+cluster_size:1
+```
+
+All slots assigned does **not** prove that Redis considers the cluster
+healthy. Inspect `CLUSTER NODES`, `CLUSTER INFO`, and server logs to
+identify the reason. A single master is not a recommended Redis Cluster
+topology; prefer at least **three masters** for functional cluster testing.
+Three masters without replicas are *not* highly available. Production
+typically needs replicas and appropriate failure-domain separation.
+
+Do **not** treat `cluster-require-full-coverage no` or
+`cluster-allow-reads-when-down yes` as fixes for cluster health: the latter
+does not make failed-cluster writes succeed.
+
+For a fresh three-master setup, after provisioning `redis-1`,
+`redis-2`, and `redis-3` on the same private network, initialize from
+a container that can resolve all three service names:
+
+```sh
+redis-cli --cluster create redis-1:6379 redis-2:6379 redis-3:6379 --cluster-replicas 0
+```
+
+Then set `redis.addrs` to all three hostnames and confirm
+`cluster_state:ok`. Each Redis master must announce an address reachable
+from the others and SVR2; the cluster bus ports must be reachable between
+Redis nodes. This is an architecture example, not a prebuilt Compose stack.
+
+### Restart and health verification
+
+```sh
+docker compose --env-file deploy/standard/.env -f deploy/standard/compose.yaml up -d --force-recreate redis svr2
+docker compose -f deploy/standard/compose.yaml logs -f svr2
+docker compose -f deploy/standard/compose.yaml exec redis redis-cli cluster info
+```
+
+If control port 8081 is not published, test readiness **inside** SVR2:
+
+```sh
+docker compose -f deploy/standard/compose.yaml exec svr2 \
+  curl -i http://127.0.0.1:8081/health/ready
+```
+
+The `redis-cli ping` health check tests basic Redis responsiveness, **not**
+Redis Cluster readiness. An SVR2 process can be alive while Raft readiness
+is still pending. If you change cluster topology, keep existing persistent
+Redis data unless you have explicitly decided to discard development state.
