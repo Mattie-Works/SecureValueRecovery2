@@ -94,7 +94,7 @@ func (n *Socket) recv(pb proto.Message) error {
 func NewSocket(config *pb.InitConfig, sc SocketConfig) (_ *Socket, returnedErr error) {
 	sock, err := sc.sock()
 	if err != nil {
-		return nil, fmt.Errorf("creating nitro socket: %w", err)
+		return nil, fmt.Errorf("creating enclave socket: %w", err)
 	}
 	if _, err := sock.Write([]byte{'N'}); err != nil {
 		return nil, fmt.Errorf("writing nitro hello byte: %w", err)

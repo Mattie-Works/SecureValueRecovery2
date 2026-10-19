@@ -45,7 +45,7 @@ var (
 		},
 	}
 	hostPath   = "../main"
-	sgxPath    = "../../enclave/build/enclave.test"
+	nitroPath  = "../../enclave/build/enclave.nsm"
 	clientPath = "target/debug/rustclient"
 	authSecret = "123456"
 )
@@ -94,8 +94,8 @@ func TestRustClient(t *testing.T) {
 		hostPath,
 		"-hconfig_path", filepath.Join(dir, "hconfig"),
 		"-econfig_path", filepath.Join(dir, "econfig"),
-		"-enclave_type", "sgx",
-		"-sgx_path", sgxPath)
+		"-enclave_type", "nitro",
+		"-nitro_path", nitroPath)
 	hostCmd.Env = append(hostCmd.Env, "AUTH_SECRET="+base64.StdEncoding.EncodeToString([]byte(authSecret)))
 	hostCmd.Stdout = servicetest.NewPrefixWriter("HOST_OUT: ", os.Stderr)
 	hostCmd.Stderr = servicetest.NewPrefixWriter("HOST_ERR: ", os.Stderr)

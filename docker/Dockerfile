@@ -3,19 +3,10 @@
 # docker build -t oebuild .
 FROM amd64/debian:bookworm@sha256:f2c0a2c38468521a54160b3e6105d4be0afa9f0c70eddc45def08aa75c8b4404 AS base
 
-LABEL description="linux build environment for sgx."
+LABEL description="Linux build environment for Nitro and SEV."
 
 COPY docker/apt.conf docker/sources.list /etc/apt/
 RUN rm -rf /etc/apt/sources.list.d/*
-COPY docker/sgx_runtime_libraries.sh /tmp/
-RUN /tmp/sgx_runtime_libraries.sh
-
-ARG OPENENCLAVE_VERSION=0.19.17
-ARG OPENENCLAVE_HASH=b5636751273fd094e21de61ae91a7fdedb507001ebe19f9b2b28088b0927ce52
-ADD --checksum=sha256:${OPENENCLAVE_HASH} \
-    https://github.com/openenclave/openenclave/releases/download/v${OPENENCLAVE_VERSION}/Ubuntu_2204_open-enclave_${OPENENCLAVE_VERSION}_amd64.deb ./
-RUN dpkg -i Ubuntu_2204_open-enclave_${OPENENCLAVE_VERSION}_amd64.deb
-
 FROM public.ecr.aws/amazonlinux/amazonlinux:2023.8.20250908.0@sha256:0afbc075facf7bb19482cd244d037222d6f998e8a443106fe245d23008910452 AS amazon
 
 FROM amazon AS nsmbuild
@@ -100,10 +91,9 @@ RUN cd /tmp && \
     ln -s /opt/clang/bin/clang-11 /opt/clang/bin/clang++-11 && \
     rm -fv clang+llvm-${LATEST_CLANG_11}.tar.xz
 
-ENV PATH="/opt/clang/bin:/opt/openenclave/bin:/opt/go/bin:/opt/protobuf/bin:${PATH}"
+ENV PATH="/opt/clang/bin:/opt/go/bin:/opt/protobuf/bin:${PATH}"
 ENV GOROOT="/opt/go"
 ENV GOBIN="/opt/go/bin"
-ENV PKG_CONFIG_PATH="/opt/openenclave/share/pkgconfig"
 
 ARG PROTOC_GEN_GO_GITREV=96a179180f0ad6bba9b1e7b6e38d0affb0168e9a
 RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_GITREV}
@@ -128,19 +118,6 @@ RUN apt-get install -y xz-utils && \
      rm -rf /tmp/rust-${RUST_VERSION}-x86_64-unknown-linux-gnu)
 
 CMD ["/bin/bash"]
-
-FROM base AS sgxrun
-
-RUN apt-get update && apt-get install -y \
-    libsgx-dcap-default-qpl=1.26.100.1-jammy1 \
-    libsgx-dcap-default-qpl-dev=1.26.100.1-jammy1 \
-    libcurl4 && apt-get clean
-COPY host/main /bin/svr2
-COPY enclave/releases/sgx /enclaves
-COPY host/cmd/control/control /bin/svr3control
-RUN ln -s /bin/svr3control /bin/svr2control
-
-ENTRYPOINT ["/bin/svr2"]
 
 FROM amazon AS nsmrun
 ADD --chown=0:0 enclave/build/enclave.nsm /bin/svr2

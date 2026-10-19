@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -149,14 +151,33 @@ func startService(t *testing.T) *config.Config {
 		cancel()
 	})
 
-	sgx := enclave.SGXEnclave()
-	if err := sgx.Init("../../enclave/build/enclave.test", &econfig); err != nil {
-		logger.Fatalf("creating sgx enclave: %v", err)
+	nitroPort := randomPort(t)
+	cmd := exec.CommandContext(ctx, "../../enclave/build/enclave.nsm", "--sock_type=af_inet", fmt.Sprintf("--port=%d", nitroPort))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting simulated Nitro: %v", err)
 	}
-	logger.Infof("Starting SGX service")
+	go func() { _ = cmd.Wait() }()
+	addr := fmt.Sprintf("127.0.0.1:%d", nitroPort)
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		conn, err := net.DialTimeout("tcp", addr, time.Second)
+		if err == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("simulated Nitro did not start: %v", err)
+		}
+	}
+	nitro, err := enclave.NewSocket(&econfig, enclave.SocketConfig{Host: "127.0.0.1", Port: uint32(nitroPort)})
+	if err != nil {
+		t.Fatalf("connecting to simulated Nitro: %v", err)
+	}
+	logger.Infof("Starting simulated Nitro service")
 	go func() {
-		defer sgx.Close()
-		Start(ctx, hconfig, auth.AlwaysAllow, sgx, pb.DatabaseVersion_DATABASE_VERSION_SVR2)
+		defer nitro.Close()
+		Start(ctx, hconfig, auth.AlwaysAllow, nitro, pb.DatabaseVersion_DATABASE_VERSION_SVR2)
 	}()
 	waitForReady(t, hconfig.ControlListenAddr, time.Minute)
 	return hconfig

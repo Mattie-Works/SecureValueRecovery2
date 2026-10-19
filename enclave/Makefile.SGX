@@ -1,4 +1,0 @@
-include Makefile.base
-
-CFLAGS ?= $(SGX_CFLAGS)
-CXXFLAGS ?= $(SGX_CXXFLAGS)

@@ -31,10 +31,9 @@ import (
 )
 
 var (
-	sgxPath     = flag.String("sgx_path", "", "Path to binary holding the sgx enclave")
 	econfigPath = flag.String("econfig_path", "", "Path to enclave configuration prototext file")
 	hconfigPath = flag.String("hconfig_path", "", "Path to host configuration yaml file")
-	enclaveType = flag.String("enclave_type", "sgx", "one of {sgx, nitro, sev}")
+	enclaveType = flag.String("enclave_type", "nitro", "one of {nitro, sev}")
 	nitroPort   = flag.Int("nitro_port", 27427, "Nitro port if --enclave_type=nitro")
 	nitroPath   = flag.String("nitro_path", "", "Path to nitro binary for if enclave is simulated")
 	nitroCID    = flag.Int("nitro_cid", 16, "Nitro CID")
@@ -54,7 +53,9 @@ func runSimulatedNitro(ctx context.Context) {
 	}
 	go io.Copy(os.Stdout, stdout)
 	go io.Copy(os.Stderr, stderr)
-	cmd.Start()
+	if err := cmd.Start(); err != nil {
+		logger.Fatalf("starting simulated Nitro process: %v", err)
+	}
 	go func() {
 		logger.Fatalf("Nitro simulated command finished: %v", cmd.Wait())
 	}()
@@ -144,13 +145,6 @@ func main() {
 	var enc enclave.Enclave
 	logger.Infof("creating enclave")
 	switch *enclaveType {
-	case "sgx":
-		sgx := enclave.SGXEnclave()
-		if err := sgx.Init(*sgxPath, &econfig); err != nil {
-			logger.Fatalf("creating sgx enclave: %v", err)
-		}
-		defer sgx.Close()
-		enc = sgx
 	case "nitro":
 		sc := enclave.SocketConfig{Port: uint32(*nitroPort)}
 		if econfig.GroupConfig.Simulated {
@@ -161,7 +155,7 @@ func main() {
 		}
 		nitro, err := enclave.NewSocket(&econfig, sc)
 		if err != nil {
-			logger.Fatalf("creating nitro connection: %v", err)
+			logger.Fatalf("creating Nitro connection: %v", err)
 		}
 		defer nitro.Close()
 		enc = nitro
@@ -169,7 +163,7 @@ func main() {
 		sc := enclave.SocketConfig{Port: uint32(*sevPort), Host: *sevHost}
 		sev, err := enclave.NewSocket(&econfig, sc)
 		if err != nil {
-			logger.Fatalf("creating nitro connection: %v", err)
+			logger.Fatalf("creating SEV connection: %v", err)
 		}
 		defer sev.Close()
 		enc = sev

@@ -7,8 +7,7 @@ package svr2.enclaveconfig;
 option go_package = "github.com/signalapp/svr2/proto";
 option optimize_for = LITE_RUNTIME;
 
-// Should match <openenclave/log.h>'s oe_log_level_t
-// (https://github.com/openenclave/openenclave/blob/master/include/openenclave/log.h)
+// Stable protocol values, independent of the host's logging implementation.
 enum EnclaveLogLevel {
   LOG_LEVEL_NONE = 0;
   LOG_LEVEL_FATAL = 1;
@@ -76,7 +75,7 @@ message RaftGroupConfig {
   DatabaseVersion db_version = 5;
   // Attestation timeout, in seconds
   uint32 attestation_timeout = 6;
-  // Whether this is a real SGX or simulated SGX environment.
+  // Whether this environment is simulated rather than hardware-isolated.
   bool simulated = 7;
 }
 

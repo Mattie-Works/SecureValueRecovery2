@@ -53,9 +53,7 @@ dockerbase: | git
 	    docker buildx build $(DOCKER_BUILD_ARGS) --load -f docker/Dockerfile -t svr2_buildenv --target=builder .
 
 enclave_releaser: enclave host  # depends on 'host' so its tests will run
-	cp -vn enclave/build/enclave.Standard_DC2s_v3  "enclave/releases/sgx/Standard_DC2s_v3.$$(/opt/openenclave/bin/oesign  dump -e enclave/build/enclave.Standard_DC2s_v3  | fgrep -i mrenclave | cut -d '=' -f2)"
-	cp -vn enclave/build/enclave.Standard_DC8s_v3  "enclave/releases/sgx/Standard_DC8s_v3.$$(/opt/openenclave/bin/oesign  dump -e enclave/build/enclave.Standard_DC8s_v3  | fgrep -i mrenclave | cut -d '=' -f2)"
-	cp -vn enclave/build/enclave.Standard_DC24s_v3 "enclave/releases/sgx/Standard_DC24s_v3.$$(/opt/openenclave/bin/oesign dump -e enclave/build/enclave.Standard_DC24s_v3 | fgrep -i mrenclave | cut -d '=' -f2)"
+	@echo 'Nitro enclave is built at enclave/build/enclave.nsm'
 
 
 ### Remaining targets run docker/packer and should be run directly on the host (not with docker_) ###
@@ -102,7 +100,6 @@ nsmrun: docker/build/nsmrun.tar
 
 enclave_release: docker_enclave_releaser nsmrun
 	docker buildx build $(DOCKER_BUILD_ARGS) --load -f docker/Dockerfile -t svr2_nsmeif --target=nsmeif .
-	docker buildx build $(DOCKER_BUILD_ARGS) --load -f docker/Dockerfile -t svr2_sgxrun --target=sgxrun .
 	docker run $(DOCKER_RUN_ARGS) --rm \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v $${PWD}/enclave/releases/nitro:/out/ \

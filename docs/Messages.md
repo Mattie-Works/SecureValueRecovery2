@@ -1,14 +1,13 @@
 # Enclave Messages: The Enclave's Logical Interface
-The SVR2 enclave interface defined in [svr2.edl](../../shared/svr2.edl) is 
-generic. It provides initialization and message passing functions that are
-independent of the application logic. The _logical_ interface of the enclave
+The SVR2 host-to-enclave socket protocol provides initialization and message
+passing functions independent of the application logic. The _logical_ interface of the enclave
 is defined by these messages and how the enclave responds to them. In what
 follows we will think of the different messages that can be sent to the enclave
 as RPCs and refer to them as "calls" or "commands".
 
 ## Three Interfaces: Host, Peer, and Client
 SVR2 enclaves interact with three different types of entities: the _host_ that
-makes ECALLs and receives OCALLs from the enclave, other _peer_ enclaves, and
+communicates with the enclave over a socket, other _peer_ enclaves, and
 _clients_ that are using the service to store and recover secure values.
 
 The host interface includes a number of administrative commands (create or join
@@ -101,7 +100,7 @@ that must be handled asynchronously. These are all sent as a
 1. **RequestMetrics** Get all metrics and gauges collected by the enclave.
 1. **RefreshAttestation** Refresh attestations for peer and client connections.
 1. **SetLogLevel** Sets the enclave's logging level with an `::svr2::EnclaveLogLevel`
-   enum. These enum values match Open Enclave's [oe_log_level_t](https://github.com/openenclave/openenclave/blob/master/include/openenclave/log.h).
+   enum. These numeric values are stable across host and enclave implementations.
 1. **RelinquishLeadership** (`bool` - _requires consensus_) If we are the Raft
    leader, give it up and attempt to pass leadership to an up-to-date peer without 
    waiting for the election timers.
